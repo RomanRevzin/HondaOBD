@@ -17,7 +17,7 @@ confidence tags are in [`docs/research/`](research/).
 |---|---|---|
 | Car | Exact vehicle | **2002 Civic Si — US EP3 hatchback, K20A3, 5-speed manual, ECU `37820-PNF-A05`.** (UK-built; immobilizer confirmed ECM-held, same as the D17 — see §12.) |
 | Scope | How far to go | **Option C — "all the way":** diagnostics + safe service writes + gated immobilizer/SRS + **ECM reflash**. Gated functions still proceed with care and your explicit go-ahead. |
-| Budget | Spending | **Zero.** No HDS day-pass, no SAE spec purchases. Rely on free/open resources (see §7). Any unavoidable paid shortcut gets flagged for you to decide, not assumed. |
+| Budget | Spending | **No paid software or protocols** — no HDS subscription, no SAE spec purchases; we get the protocols the free/RE way (§7, §12.G). **Hardware is fine to buy** — the device parts are unavoidable and you'll get them (parts list: [`hardware/BOM.md`](../hardware/BOM.md)). |
 | License | Repo license | **GPL-3.0** — lets us reuse the best K-series/Honda references (HondaECU, freediag, both GPL-3.0). *My call per your "do what is needed"; say the word if you'd rather go permissive (MIT).* |
 | REA | When to install | **Deferred to the reverse-engineering phase (Phase 3+).** It needs a Node upgrade (22.16 → ≥22.23) and writes to `~/.claude.json`; not needed at Phase 0/1. |
 
@@ -259,12 +259,13 @@ found about how it actually fits (full detail in [`09-rea-toolkit-fit.md`](resea
 2. **Verify on your car with the device's own sniffer + generic OBD + SCS blink — $0.** Confirms the GPL
    tables against your actual ECU/ABS/SRS/EPS and nails down the request bytes the open sources mark
    "unconfirmed."
-3. **Only if you later want immobilizer/airbag writes or the reflash sequence — one flagged spend
-   (~$35–40):** a ~$25–30 GODIAG GD101 clone interface + a ~$10 one-day i-HDS subscription, captured with
-   our own passive tap on your car. This is the sole near-free way past Honda's deliberately-withheld
-   SecurityAccess key (§12.F–G). Your call if/when — everything above is done first at $0.
-4. **Reverse-engineer the HDS binaries and a clone J2534 DLL with REA+Ghidra — $0**, to fill remaining
-   gaps; the OKI firmware/reflash route is §12.D–E.
+3. **For the write/reflash gates, reverse-engineer HDS itself with REA+Ghidra — $0 (labor, not money).**
+   The i-HDS installer is free to download; the SecurityAccess seed→key and the write/flash sequences
+   live inside its binaries, and recovering them is exactly the job REA was chosen for (§12.G). No HDS
+   subscription needed to *analyze* the software.
+4. **If you ever borrow a Honda-capable tool, the device's passive sniffer captures a live session — $0.**
+   A one-off, no purchase. (Honest limit: full immobilizer key-registration-from-scratch also needs
+   Honda's per-car iN code, which isn't in any binary — see §12.G.)
 
 ⚠️ **Repo hygiene (your global rule):** REA evidence bundles, Ghidra projects, and any proprietary
 HDS material must be kept **out of** the public `HondaOBD` repo. We'll store them in a separate local
@@ -286,8 +287,8 @@ read engine DTCs + live data. Proves the hardware and gives immediate value. (Lo
 codes by timing indicator blinks. No protocol needed — guaranteed coverage of every Tier-A unit's codes.
 
 **Phase 3 — Reuse + verify (mostly $0).** Import the GPL HDS database; add passive sniff mode; confirm
-the tables on the car via generic OBD + SCS blink + the device's pin-7 sniffer. The optional ~$35–40
-HDS-capture (§7 step 3, §12.G) slots in here only if/when you want the write/reflash sequences.
+the tables on the car via generic OBD + SCS blink + the device's pin-7 sniffer. The write/reflash
+sequences come from reverse-engineering HDS with REA+Ghidra (§7 step 3, §12.G) — labor, not a purchase.
 
 **Phase 4 — Honda mode, read.** Implement the Honda K-line engine from the tables: full
 DTCs/freeze/live-data/snapshot for ECM, ABS, SRS, EPS and immobilizer status, with Honda's scaling.
@@ -399,13 +400,18 @@ ABS/SRS/EPS + Honda-mode reads), live data with correct names/formulas (GPL DB),
 identification. Clearing codes and the service learns are very likely reachable too, but a few request
 bytes are "unconfirmed" in the open sources, so they get verified on the car. Progress only truly stalls
 at two gates, both behind Honda's withheld SecurityAccess key: (1) immobilizer key registration and
-airbag writes; (2) stock-ECU read/reflash.
+airbag writes; (2) stock-ECU read/reflash. Both are reached the free RE way in (G), not by purchase.
 
-**G. The single flagged spend (your call).** The only near-free way through those two gates is to capture
-a genuine HDS session on your own car: ~$25–30 GODIAG GD101 clone + ~$10 one-day i-HDS subscription,
-sniffed with the device's own passive tap (~$35–40 total). Per your "no money" rule this stays optional
-and flagged — everything in (F) is done first at $0; this is only if/when you want the write/reflash
-sequences. (Legally this sits in the DMCA interoperability + owner vehicle-repair exemption.)
+**G. Getting past the two gates without paying for protocols (your rule).** Since we're not buying HDS
+or the SAE specs, the route is to **reverse-engineer HDS's own binaries with REA+Ghidra** — the i-HDS
+installer is free to download, and the SecurityAccess seed→key plus the write/flash sequences live
+inside it. That's labor, not money, and it's the core job the REA toolkit was chosen for. Two honest
+caveats: (1) full immobilizer *key registration from scratch* also needs Honda's per-car **iN code** (a
+daily-rotating value from Honda's online system, not an algorithm in any binary), so that one function
+stays gated regardless — reading immobilizer status/DTCs does not; (2) recovering a seed→key brushes the
+"protection measure" line, so we keep it scoped strictly to your own car's diagnostics/repair and out of
+the public repo. If you ever *borrow* a Honda-capable tool, the device's passive sniffer also captures a
+live session at $0. (Legally this sits in the DMCA interoperability + owner vehicle-repair exemption.)
 
 **H. Si-specific service functions.** Implement idle learn **and** crank/CKP pattern clear+learn (order
 after a full clear: idle learn → CKP learn → test drive), plus EPS torque-sensor neutral learn (needs
