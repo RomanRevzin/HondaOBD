@@ -1,0 +1,34 @@
+# Reverse-engineering artifacts and proprietary material stay OUT of this public repo
+# (REA evidence bundles, Ghidra projects, dealer software, firmware dumps, captures).
+/re/
+/evidence/
+*.gpr
+*.rep
+*.rwd
+*.bin
+*.rom
+captures/
+*.pcap
+*.pcapng
+*.sr
+*.vcd
+
+# Build output
+/build/
+/firmware/build/
+*.o
+*.elf
+*.uf2
+*.hex
+
+# Host app (.NET)
+bin/
+obj/
+*.user
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.vs/
+.vscode/
+*.swp
