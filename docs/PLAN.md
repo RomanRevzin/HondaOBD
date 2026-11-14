@@ -15,7 +15,7 @@ confidence tags are in [`docs/research/`](research/).
 
 | # | Decision | Choice |
 |---|---|---|
-| Car | Exact vehicle | **2002 Civic Si — US EP3 hatchback, K20A3, 5-speed manual, PNF ECU.** (UK-built; immobilizer may differ from D17 sedans — being verified.) |
+| Car | Exact vehicle | **2002 Civic Si — US EP3 hatchback, K20A3, 5-speed manual, ECU `37820-PNF-A05`.** (UK-built; immobilizer confirmed ECM-held, same as the D17 — see §12.) |
 | Scope | How far to go | **Option C — "all the way":** diagnostics + safe service writes + gated immobilizer/SRS + **ECM reflash**. Gated functions still proceed with care and your explicit go-ahead. |
 | Budget | Spending | **Zero.** No HDS day-pass, no SAE spec purchases. Rely on free/open resources (see §7). Any unavoidable paid shortcut gets flagged for you to decide, not assumed. |
 | License | Repo license | **GPL-3.0** — lets us reuse the best K-series/Honda references (HondaECU, freediag, both GPL-3.0). *My call per your "do what is needed"; say the word if you'd rather go permissive (MIT).* |
@@ -25,8 +25,9 @@ confidence tags are in [`docs/research/`](research/).
 open ecosystem (Hondata, KTuner, RomRaider-style tooling). Reflash is far more tractable here than on
 the 1.7 sedans — though the *stock* ECU's connector-reflash entry still appears dealer-locked (Hondata
 K-Pro adds a daughterboard rather than cracking it), and the ECU's OKI nX-8/500S microcontroller has
-**no public disassembler**, which is the single biggest obstacle on the reflash path. The EP3-specific
-research pass is confirming both points.
+**no off-the-shelf disassembler** — though the EP3 deep-dive since found a concrete free path to build
+one (free ISA docs + a template to fork; see §12.E). Both points are now confirmed; §12 carries the
+detail and several other refinements from that pass.
 
 ---
 
@@ -46,8 +47,8 @@ charm.li, SAE standards, Honda's 2017 dealer job aid):
   **K-line** family, not CAN bus. CAN doesn't arrive on the Civic until 2006. This makes the car
   *simpler* electrically but means **no off-the-shelf modern OBD dongle reaches anything but
   emissions data** on it.
-- There are **two separate diagnostic wires** on the connector, and this is the crux of the whole
-  design (see §3).
+- On the Si, **every diagnosable unit sits on the single K-line (pin 7)** — see §3, revised by the
+  EP3-specific research (§12.A). One transceiver reaches them all; simpler hardware than first thought.
 
 What "read/write every possible code" splits into, by how reachable it is:
 
@@ -79,7 +80,7 @@ real safety/theft considerations. We treat them as research, gated behind your e
 
 ---
 
-## 3. The finding that shapes the hardware: two diagnostic lines
+## 3. The finding that shapes the hardware: one K-line reaches every unit
 
 From Honda's factory connector views and splice diagrams (HIGH confidence, corroborated by three of
 the nine research threads), the 2002 US Civic connector has exactly **seven populated pins**:
@@ -88,37 +89,43 @@ the nine research threads), the 2002 US Civic connector has exactly **seven popu
 |---|---|---|---|---|
 | 4 | BLK | Chassis ground | Body | — |
 | 5 | BRN/YEL | Signal ground | ECM/PCM E3 | — |
-| **7** | LT BLU | **K-line** (~12 V idle) | ECM/PCM E23 **+ ABS unit** | ISO 9141-2 legislated OBD *and* Honda mode |
+| **7** | LT BLU | **K-line** (~12 V idle) | ECM E23 — **and ABS, SRS, EPS** | ISO 9141-2 OBD *and* the Honda protocol for every diagnosable unit |
 | **9** | BRN | **SCS** service line (~5 V idle) | ECM, SRS, ABS | Ground it → units blink stored codes |
 | **12** | RED/WHT | **WEN** write-enable | ECM/PCM E30 | Dealer tool reportedly puts +5 V here to reflash |
-| **14** | GRY | **DIAG-H** (~5 V idle) | **SRS + Immobilizer (+ EPS on Si)** | Honda's *second* serial line; NOT the K-line |
+| 14 | GRY | ~5 V immobilizer line | immobilizer unit (role unproven) | *Not* a confirmed serial bus; passive-sniff point only (see §12.A) |
 | 16 | WHT/RED | Battery +12 V (perm.) | via BACK UP fuse | ~4 A max, always live |
 
-**The key consequence:** the engine/transmission and ABS live on the 12-volt K-line (pin 7), but the
-airbag, immobilizer and electric-steering units live on a *different* ~5-volt single-wire line called
-**DIAG-H** (pin 14). A normal K-line OBD adapter can't talk to them at all — which is exactly why cheap
-scanners "can't see" airbag/SRS codes on these Hondas. To cover Tier A you must drive **both** lines,
-plus switch the SCS line (pin 9) and, for reflash, the WEN line (pin 12).
+**The key consequence (revised by the EP3-specific research — see §12.A):** on the Si, the engine,
+**ABS, airbag (SRS) and EPS all share the single K-line on pin 7.** The EP3 service manual's own DLC
+continuity test ties pin 7 to the ECM, ABS, SRS and EPS wiring, and Honda's dealer job aid lists the
+2001–05 Civic (Si included) as K-line only. So **one 12 V K-line transceiver on pin 7 reaches every
+unit the dealer tool can see** — you still can't do it with a generic dongle (that only does the
+*legislated* subset), but you don't need a second serial channel. Pin 14 is a separate ~5 V
+immobilizer-related line whose exact role isn't proven and is *not* a confirmed diagnostic bus. (The
+earlier "two serial lines" picture came from D17 wiring and from conflating Honda's *protocol* name
+"DIAG-H" with the physical pin-14 wire — §12.A untangles this.) To cover Tier A you drive the pin-7
+K-line, switch the SCS line (pin 9) for blink codes, and keep the WEN line (pin 12) for the reflash
+phase.
 
-⚠️ One hard safety rule falls straight out of this: **a 12 V K-line transceiver must never be wired to
-pin 14.** DIAG-H is a ~5 V bus feeding the airbag and immobilizer units; 12 V there risks damaging
-them. The design handles this with isolated, independently-configured channels (§5).
+⚠️ Caution that still holds: **don't drive 12 V onto pin 14.** It's a ~5 V line tied to the immobilizer,
+so the device treats pin 14 as a *passive, high-impedance sniff point only* (never driven) until its
+role is confirmed by probing the actual car in Phase 0.
 
 **Protocols, by confidence:**
 
 - **Legislated OBD-II = ISO 9141-2** on pin 7 (5-baud init, address 0x33, 10.4 kbit/s). HIGH. This is
   the safe, fully-documented first milestone — standard, non-proprietary, same as thousands of other
   pre-2004 cars.
-- **Honda "mode"** (the dealer protocol) also runs on pin 7 for ECM/ABS, and on pin 14 (DIAG-H) for
-  SRS/immobilizer/EPS. The *frame format* is known (header/command, length byte, data, two's-complement
-  checksum — consistent across Honda motorcycle tools, the 1992–2000 3-pin hobby protocol, and an
-  HDS-derived database someone published). But **the actual request→reply byte sequences for a
-  2001–2007 Honda car are not public.** No one has published a captured dealer-tool session on one of
-  these cars. MEDIUM on format, LOW/unknown on the specific commands.
+- **Honda "mode"** (the dealer protocol) runs on the same pin-7 K-line for every diagnosable unit. The
+  *frame format* is now **confirmed on real cars**: `[command, length, data…, checksum]` where the whole
+  frame sums to 0 mod 256, with command codes readout `0xA0`, clear `0xA1`, inforead `0xA2`, wake `0xFE`
+  (from the HDS decompile, §12.B), corroborated by actual captures — a K-engine ECU (`FE 04 72 8C` wake,
+  `72 05 71 pp cc` table read, reply header `0x02`) and a CR-V airbag unit (`60 05 70 02 29`). The
+  Honda-mode baud is contested (9600 vs 10400) so firmware makes it selectable. What's still unverified
+  on *this* car is the per-unit reply semantics and the exact request bytes for some functions. MEDIUM.
 
-That gap is the central reverse-engineering problem of the project, and it's genuinely solvable (§7),
-but it means: **the proprietary command sets will come from capturing a real Honda-capable tool
-talking to your actual car, not from a datasheet.**
+So the proprietary command knowledge now comes largely from an **open GPL decompile of HDS** (§12.B),
+verified against your own car with the device's sniffer — not purely from scratch as first feared.
 
 ---
 
@@ -128,7 +135,7 @@ talking to your actual car, not from a datasheet.**
 |---|---|---|---|
 | Generic OBD-II DTCs + live data (engine) | **Straightforward** | HIGH | Standard ISO 9141-2; open-source libs exist (iwanders/OBD9141, MIT) |
 | Honda-mode engine DTCs + Honda "snapshot" fast data | **Doable, needs RE** | MEDIUM | Frame format known; commands via capture |
-| ABS / SRS / EPS / immobilizer DTC read + clear | **Doable, needs RE + both lines** | MEDIUM | DIAG-H line + Honda framing; commands via capture |
+| ABS / SRS / EPS / immobilizer DTC read + clear | **Doable** | MEDIUM | All on the pin-7 K-line; Honda framing + the GPL HDS tables (§12.B); SCS blink codes as a $0 fallback |
 | Blink-code fallback (SCS) for all units, no protocol at all | **Easy, independent path** | HIGH | Factory procedure: ground pin 9, count indicator flashes |
 | ECM reset / idle learn / actuator tests | **Doable, needs RE** | MEDIUM | Dealer functions; command bytes via capture |
 | **Immobilizer key registration** | **Gated** | — | Needs a per-car code issued by Honda even to dealers; sensitive — separate phase, your call |
@@ -158,10 +165,10 @@ the car in Phase 0. Concretely:
   dominant timeout"** — many LIN/K-line chips force the line high after tens of ms, which would break
   5-baud init and long wake-up pulses. Active part, ~US$1, 3.3 V-logic-friendly. Second choice: TI
   TLIN1027-Q1.
-- **DIAG-H channel (pin 14): a separate, independently-powered single-wire channel** with selectable
-  pull-up (off / 5 V / 12 V), programmable receive threshold, and ADC read-back — because its exact
-  levels are the biggest electrical unknown. Built so it can be mapped to pin 7 *or* pin 14, giving
-  two interchangeable serial channels.
+- **Pin-14 channel: a passive, high-impedance ~5 V sniff input only** (never driven). The EP3 research
+  shows the diagnosable units are all on the pin-7 K-line, so the originally-planned driven "DIAG-H
+  channel" is cut down to a listen-only tap to observe immobilizer-related activity; its role is
+  confirmed on the car in Phase 0 before anything more is built for it.
 - **SCS switch (pin 9):** a protected open-drain low-side switch with current limit and voltage
   read-back — grounds the line on command, reads it back for the blink-code reader.
 - **WEN (pin 12):** a switchable, current-limited 5 V driver, populated but used only in the reflash
@@ -181,8 +188,9 @@ experiments. No board spin needed to begin protocol work. (BOM ~US$75–130 for 
 ~US$25–35/board in parts for a custom PCB later.)
 
 **No existing open board covers Honda's pins.** The closest, Macchina M2 and OpenDiag, miss the SCS
-ground and the pin-14 serial channel — so this is genuinely a custom design, though we borrow proven
-sub-circuits (ELM327 reference K-line driver, etc.).
+ground and a clean passive-sniff tap — so this is genuinely a custom design, though we borrow proven
+sub-circuits (the L9637D K-line driver, and the `jared52005/Monitor` FT232+MC33660 passive tap as a
+sniffer precedent; §12.I).
 
 ---
 
@@ -201,21 +209,22 @@ Layered, with a clean split between what *must* be timed precisely (firmware) an
   Pico 2 W firmware (C, GNU Arm)
     ├─ transport (USB/BLE/Wi-Fi)
     ├─ service: J2534-shaped primitives (init, send/recv, timing params) + a raw pulse primitive
-    ├─ protocol engines: (a) ISO 9141-2 legislated OBD   (b) Honda K-line mode   (c) DIAG-H
+    ├─ protocol engines: (a) ISO 9141-2 legislated OBD   (b) Honda K-line mode (all units)
     ├─ passive sniff mode (timestamped byte logger)
-    └─ physical drivers: K-line, DIAG-H, SCS, WEN  (PIO-timed)
+    └─ physical drivers: K-line (pin 7), SCS (pin 9), WEN (pin 12), pin-14 sniff  (PIO-timed)
 ```
 
 - **Model the link layer on the SAE J2534 primitives** (configurable baud, parity, checksum-off,
   5-baud and fast init, arbitrary wake-up pulses). J2534 is a published, complete model for exactly
   this, and designing to it means our firmware can later *also* present a J2534 interface that Honda's
   own HDS software could drive — which doubles as the best capture mechanism (§7).
-- **Reusable prior art:** `iwanders/OBD9141` (MIT) for the ISO 9141-2 layer; `HondaECU/eculib` (GPL-3.0)
-  and `kerpz/ArduinoHondaOBD` (no license) as *protocol references* for Honda framing. ⚠️ **License
-  decision needed early** (§11): the best Honda references are GPL-3.0, so copying their code forces
-  GPL on the project; using only the documented facts does not.
-- **Honda-specific DTC/PID tables are not in any open database** — they get built from captures and the
-  factory manual. Generic DTC text is freely available (MIT).
+- **Reusable prior art:** `iwanders/OBD9141` (MIT) for the ISO 9141-2 layer; and the big one —
+  **`huhwhatbruh/HondaDiagnosticSuite` (GPL-3.0)**, a decompile of Honda's HDS that ships ~36,000 DTCs,
+  ~25,882 live-signal definitions *with Honda's scaling formulas*, 182 systems, and working Honda-protocol
+  code. Our GPL-3.0 license (§0) lets the host build directly on it (§12.B). `HondaECU/eculib` (GPL-3.0)
+  and `kerpz/ArduinoHondaOBD` are further protocol references.
+- **Honda-specific DTC/PID tables now have an open source** — HondaDiagnosticSuite's database (above).
+  Captures + the factory manual verify it on the car and fill the few request bytes it marks unconfirmed.
 - **Testing without the car:** build a Honda ECM emulator from captured request/response tables so the
   firmware can be regression-tested on the bench. A junkyard ECM (~`37820-PLM-xxx`) powered on the
   bench is the highest-fidelity test target and only needs power, not a running car.
@@ -242,18 +251,20 @@ found about how it actually fits (full detail in [`09-rea-toolkit-fit.md`](resea
 - **Signal/packet lanes (TShark, sigrok, Binwalk) are Linux-only** in REA → run them in WSL2. sigrok has
   no K-line decoder, so we write a small framing parser over the UART byte stream.
 
-**The capture strategy** — this is how the unknown Honda commands get learned, in order of cost:
+**The capture strategy (zero-budget first).** In order of cost:
 
-1. **Query the published HDS-derived database** (an open GPL project decoded protocol metadata from HDS
-   3.105.12 — per-system protocol, DIAG-H pin, DTC bit-maps). Free, immediate, needs verification on a
-   real bus.
-2. **Buy the two SAE documents** that specify the Honda lines: J2534-2/4 (DIAG-H) and J2809 (ABS/VSA).
-   ~US$70–200 total, legitimate, authoritative on the physical/framing layer.
-3. **Legitimately rent HDS** (US one-day pass ~US$60 in 2026) and **log it talking to your car** via a
-   J2534 logging shim, or let our own device sit in the middle as a sniffer. This is the decisive
-   step — it captures the exact byte sequences for every function, on *your* car.
-4. **Reverse-engineer the HDS binaries / a clone-cable firmware** with REA+Ghidra to fill gaps and
-   understand the reflash path.
+1. **Reuse `huhwhatbruh/HondaDiagnosticSuite` (GPL-3.0) — $0.** It already decompiled HDS; its database
+   and Honda-protocol code give most of the DTC/PID/command knowledge up front (§12.B). This replaces
+   the earlier "buy SAE docs / rent HDS" idea for the *read* path.
+2. **Verify on your car with the device's own sniffer + generic OBD + SCS blink — $0.** Confirms the GPL
+   tables against your actual ECU/ABS/SRS/EPS and nails down the request bytes the open sources mark
+   "unconfirmed."
+3. **Only if you later want immobilizer/airbag writes or the reflash sequence — one flagged spend
+   (~$35–40):** a ~$25–30 GODIAG GD101 clone interface + a ~$10 one-day i-HDS subscription, captured with
+   our own passive tap on your car. This is the sole near-free way past Honda's deliberately-withheld
+   SecurityAccess key (§12.F–G). Your call if/when — everything above is done first at $0.
+4. **Reverse-engineer the HDS binaries and a clone J2534 DLL with REA+Ghidra — $0**, to fill remaining
+   gaps; the OKI firmware/reflash route is §12.D–E.
 
 ⚠️ **Repo hygiene (your global rule):** REA evidence bundles, Ghidra projects, and any proprietary
 HDS material must be kept **out of** the public `HondaOBD` repo. We'll store them in a separate local
@@ -274,11 +285,12 @@ read engine DTCs + live data. Proves the hardware and gives immediate value. (Lo
 **Phase 2 — Blink-code reader (all Tier-A units).** Drive the SCS line (pin 9), read ABS/SRS/EPS/engine
 codes by timing indicator blinks. No protocol needed — guaranteed coverage of every Tier-A unit's codes.
 
-**Phase 3 — Sniffer + capture.** Add passive sniff mode; capture a Honda-capable tool (rented HDS, or a
-clone cable) talking to the car on pins 7 and 14; decode with REA/WSL2. Build the command tables.
+**Phase 3 — Reuse + verify (mostly $0).** Import the GPL HDS database; add passive sniff mode; confirm
+the tables on the car via generic OBD + SCS blink + the device's pin-7 sniffer. The optional ~$35–40
+HDS-capture (§7 step 3, §12.G) slots in here only if/when you want the write/reflash sequences.
 
-**Phase 4 — Honda mode, read.** Implement Honda K-line + DIAG-H engines from the captured tables: full
-DTCs/freeze/live-data/snapshot for ECM, ABS, SRS, EPS, immobilizer status.
+**Phase 4 — Honda mode, read.** Implement the Honda K-line engine from the tables: full
+DTCs/freeze/live-data/snapshot for ECM, ABS, SRS, EPS and immobilizer status, with Honda's scaling.
 
 **Phase 5 — Honda mode, safe writes.** Clear DTCs, ECM reset, idle learn, actuator/function tests. Custom
 PCB spin around here.
@@ -295,8 +307,9 @@ tooling, reflash path. Open-ended.
 
 - **Airbags (SRS):** disconnect battery negative and wait ≥3 min before any SRS work; use only a
   ≤10 mA meter on squib circuits; never probe/jumper SRS terminals. Mishandling can deploy an airbag or
-  disable occupant protection. The device's pin-14 and pin-9 drivers are 5 V-safe and current-limited
-  specifically because they share wires with the SRS unit.
+  disable occupant protection. The SRS unit shares the pin-7 K-line and the pin-9 SCS line, so those
+  channels are 5 V-safe and current-limited, and pin 14 is listen-only — the device never drives a line
+  into the SRS unit.
 - **Bricking the ECM on reflash:** an interrupted write damages the ECM; always on a battery
   maintainer, never during cranking. Keep a spare ECM.
 - **Immobilizer coupling:** the ECM stores the immobilizer pairing; swapping or bench-running an ECM
@@ -337,7 +350,80 @@ whenever you're next at it:
 
 None of this blocks the design, firmware scaffolding, or reverse-engineering prep — I'll keep moving on
 all of those. It just confirms the wiring before any hardware is finalized.
-```
-```
+---
 
-*Research sources and full detail: see the nine files under [`docs/research/`](research/).*
+## 12. Update from the EP3/K20A3 deep-dive (2026-11-14)
+
+A focused five-agent pass on the Si refined the plan. Full notes:
+[`ep3-01`](research/ep3-01-si-electrical-and-units.md) … [`ep3-05`](research/ep3-05-rea-ghidra-workflow.md).
+Headlines, highest-impact first:
+
+**A. One K-line, not two (hardware simplification).** On the Si the engine, ABS, airbag and EPS are all
+on the pin-7 K-line; the EP3 manual's own DLC continuity test proves it. Pin 14 is a ~5 V
+immobilizer-related line, *not* a confirmed diagnostic bus — the round-1 "two serial lines" idea came
+from D17 wiring and from the fact that Honda's *protocol family* is itself named "DIAG-H" (a name, not
+the pin). Net: the driven second channel is cut; one K-line transceiver + the SCS switch + a listen-only
+pin-14 tap covers everything. This supersedes the original framing in §3/§5.
+
+**B. Most of the HDS reverse-engineering is already done — and it's GPL-3.0.** `huhwhatbruh/Honda​
+DiagnosticSuite` decompiled Honda's HDS diagnostic bytecode and ships Honda's own database: ~36,000 DTCs
+(with descriptions/repair text), ~25,882 live-signal definitions **with Honda's exact scaling formulas**,
+182 systems, 3,607 unit converters, plus readable code for ISO 9141-2, KWP2000 and Honda's proprietary
+serial protocol. GPL-3.0 matches our license, so the host builds on it rather than hand-authoring Honda's
+tables. This removes most of the risk from the "read" goals. Caveats: it was never run on a real car
+(reply framing needs on-car verification), and the SecurityAccess seed→key is deliberately omitted.
+
+**C. Honda's car protocol frame is confirmed on real cars.** `[command, length, data…, checksum]`,
+whole frame sums to 0 mod 256; commands readout `0xA0` / clear `0xA1` / inforead `0xA2` / wake `0xFE`.
+Corroborated by an actual K-engine capture (`FE 04 72 8C`; `72 05 71 pp cc`; reply header `0x02`) and a
+CR-V airbag capture (`60 05 70 02 29`). Generic OBD is proven on a K20 (ISO 9141-2, 10400 baud, ECU
+address `0x11`). Honda-mode baud is contested (9600 vs 10400) → firmware makes it selectable, 9600 first.
+
+**D. Reflash path, hardened (still the hard part).** Honda itself can reflash the EP3 over the K-line
+(write-guarded). *No* tool at any price reflashes the **stock** EP3 ECU over the connector — even paid
+PCMflash only "virtual-reads"/writes other OKI cars and doesn't list the EP3; the tuner world uses the
+Hondata K-Pro daughterboard. The ECU is an OKI **ML66Q592** (nX-8/500S core, ~192 KB flash, 128-pin QFP,
+with an EA pin usable for a bench ROM dump). Free reflash-research route: bench-dump a junkyard
+`37820-PNF`, build a disassembler, capture a Honda write session.
+
+**E. The disassembler blocker is now cracked open.** No off-the-shelf processor module exists for the
+OKI nX-8/500S, **but** the ISA and flash manuals are *free* on the pgmfi wiki (`nx_800.500s_core.pdf`,
+`msm66591_ml66592_um.pdf`, `msm66q591_um.pdf`), and `VIRUXE/ghidra-oki66207` (public-domain) is a
+validated Ghidra SLEIGH module for the older nX-8/200 core to fork. So building an nX-8/500S Ghidra
+module is a concrete (if labor-heavy) **free** task, not a dead end. This is where REA+Ghidra earn their
+place; note stock Ghidra, not REA, loads the ECU image.
+
+**F. What $0 actually buys — and the one wall.** A fully capable **read** tool is buildable and verified
+on the car for zero money: every DTC in every reachable unit (generic OBD on the engine + SCS blink for
+ABS/SRS/EPS + Honda-mode reads), live data with correct names/formulas (GPL DB), freeze frames, service
+identification. Clearing codes and the service learns are very likely reachable too, but a few request
+bytes are "unconfirmed" in the open sources, so they get verified on the car. Progress only truly stalls
+at two gates, both behind Honda's withheld SecurityAccess key: (1) immobilizer key registration and
+airbag writes; (2) stock-ECU read/reflash.
+
+**G. The single flagged spend (your call).** The only near-free way through those two gates is to capture
+a genuine HDS session on your own car: ~$25–30 GODIAG GD101 clone + ~$10 one-day i-HDS subscription,
+sniffed with the device's own passive tap (~$35–40 total). Per your "no money" rule this stays optional
+and flagged — everything in (F) is done first at $0; this is only if/when you want the write/reflash
+sequences. (Legally this sits in the DMCA interoperability + owner vehicle-repair exemption.)
+
+**H. Si-specific service functions.** Implement idle learn **and** crank/CKP pattern clear+learn (order
+after a full clear: idle learn → CKP learn → test drive), plus EPS torque-sensor neutral learn (needs
+ambient > 20 °C). Do **not** implement ECM VIN read/write — the 2002–2004 Si ECU doesn't store a VIN.
+ECU is `37820-PNF-A05`; never cross-flash RSX (PND/PNE) calibrations.
+
+**I. Capture hardware precedent.** `jared52005/Monitor` (MIT; FT232 + MC33660 passive K-line tap →
+Wireshark) is a direct precedent for the sniffer. Clean capture point = the L9637D's logic-side RX pin
+(a 0/3.3 V copy of the bus) into a spare Pico UART + a logic-analyzer header. REA's packet/signal lanes
+are Linux-only (WSL2) with no K-line decoder, so captures are converted with a small dissector
+(`text2pcap` + a USER link type, or Monitor's dummy-IP wrapper).
+
+**Environment checklist for the RE phase (all free):** upgrade Node 22.16 → 22.23.5 → install WSL2 +
+Ubuntu (tshark, sigrok-cli) → JDK 21 → Ghidra 12.1.4 → fork `ghidra-oki66207` + fetch the free OKI PDFs
+→ `rea setup --dry-run`, then setup. RE artifacts (evidence bundles, Ghidra projects, HDS data, dumps)
+stay out of this public repo — the `.gitignore` already enforces that; a separate meta-repo versions them.
+
+---
+
+*Research sources and full detail: see the fourteen files under [`docs/research/`](research/) — nine
+from the first broad pass and five EP3/K20A3-specific (`ep3-01`…`ep3-05`).*
