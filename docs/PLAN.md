@@ -1,11 +1,32 @@
 # HondaOBD — Build Plan
 
-A device that plugs into the 16-pin OBD2 connector of a 2002 Honda Civic and reads/writes
-as many diagnostic codes and functions as the car physically allows. This is a right-to-repair
-/ owner-diagnostics project on your own vehicle.
+A device that plugs into the 16-pin OBD2 connector of a **2002 Honda Civic Si (EP3, K20A3)** and
+reads/writes as many diagnostic codes and functions as the car physically allows — up to and
+including ECM reflash. A right-to-repair / owner-diagnostics / enthusiast-tuning project on your
+own vehicle.
 
-Status: **research complete, plan drafted, nothing built yet.** Detailed research notes with
-sources and confidence tags are in [`docs/research/`](research/) (nine files, ~475 KB).
+Status: **research complete, plan drafted, nothing built yet.** A focused EP3/K20A3-specific research
+pass is in progress and will refine the Si-specific sections. Detailed research notes with sources and
+confidence tags are in [`docs/research/`](research/).
+
+---
+
+## 0. Decisions locked (2026-11-14)
+
+| # | Decision | Choice |
+|---|---|---|
+| Car | Exact vehicle | **2002 Civic Si — US EP3 hatchback, K20A3, 5-speed manual, PNF ECU.** (UK-built; immobilizer may differ from D17 sedans — being verified.) |
+| Scope | How far to go | **Option C — "all the way":** diagnostics + safe service writes + gated immobilizer/SRS + **ECM reflash**. Gated functions still proceed with care and your explicit go-ahead. |
+| Budget | Spending | **Zero.** No HDS day-pass, no SAE spec purchases. Rely on free/open resources (see §7). Any unavoidable paid shortcut gets flagged for you to decide, not assumed. |
+| License | Repo license | **GPL-3.0** — lets us reuse the best K-series/Honda references (HondaECU, freediag, both GPL-3.0). *My call per your "do what is needed"; say the word if you'd rather go permissive (MIT).* |
+| REA | When to install | **Deferred to the reverse-engineering phase (Phase 3+).** It needs a Node upgrade (22.16 → ≥22.23) and writes to `~/.claude.json`; not needed at Phase 0/1. |
+
+**Why the Si is the right car for option C:** the K20A3 is the K-series tuner platform, with a large
+open ecosystem (Hondata, KTuner, RomRaider-style tooling). Reflash is far more tractable here than on
+the 1.7 sedans — though the *stock* ECU's connector-reflash entry still appears dealer-locked (Hondata
+K-Pro adds a daughterboard rather than cracking it), and the ECU's OKI nX-8/500S microcontroller has
+**no public disassembler**, which is the single biggest obstacle on the reflash path. The EP3-specific
+research pass is confirming both points.
 
 ---
 
@@ -298,19 +319,24 @@ out of the public repo.
 
 ---
 
-## 11. Decisions I need from you
+## 11. Decisions — resolved
 
-1. **Your exact car** — VIN + ECM part number if you have them, and market (US / Europe / Japan),
-   engine, and auto/manual. This re-aims the whole plan. If you don't know yet, Phase 0 finds out.
-2. **How far do you actually want to go?** (a) read-everything diagnostics + safe service functions is
-   the solid, high-confidence target; (b) + immobilizer/key + airbag writes (gated, sensitive);
-   (c) + ECM reflash (hard, open-ended research). This sets scope.
-3. **License for the repo** — GPL-3.0 (lets us reuse HondaECU/freediag code directly) vs permissive
-   MIT (facts-only from those references, more freedom later). Needs deciding before we write code.
-4. **Install REA now?** It upgrades Node and writes to your `~/.claude.json` + skills. I'd do a
-   `--dry-run` first and keep its artifacts out of the repo. OK to proceed when we reach Phase 3?
-5. **Budget appetite** for the legitimate shortcuts: ~US$60 HDS day-pass + ~US$70–200 SAE docs would
-   save enormous RE effort. Worth it to you, or purely DIY-from-scratch?
+All five opening decisions are made (see **§0**): car = 2002 Civic Si EP3/K20A3; scope = C (all the
+way, incl. reflash); budget = zero; license = GPL-3.0; REA install deferred to the RE phase. The
+zero-budget choice reshapes §7 — see the free capture strategy there; the EP3 research pass is working
+out exactly how far "free" gets us before any spend would be needed, and that limit will be stated
+plainly.
+
+**The one thing still outstanding** is physical, not a decision — **Phase 0 data from the actual car**,
+whenever you're next at it:
+
+- the full **VIN** and the **ECM part number** (sticker on the ECU box behind the glovebox — expect
+  `37820-PNF-…`);
+- a quick probe of the OBD connector: which pins have wires, and the idle voltage on pins 7, 9, 12, 14
+  (expect ~12 V on 7, ~5 V on 9 and 14, ~0 V on 12) with the ignition on.
+
+None of this blocks the design, firmware scaffolding, or reverse-engineering prep — I'll keep moving on
+all of those. It just confirms the wiring before any hardware is finalized.
 ```
 ```
 

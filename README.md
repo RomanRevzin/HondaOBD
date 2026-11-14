@@ -1,9 +1,9 @@
 # HondaOBD
 
-A DIY device that plugs into the 16-pin OBD2 connector of a **2002 Honda Civic** (7th generation,
-2001–2005) and reads/writes as many diagnostic codes and service functions as the car physically
-allows — engine, automatic transmission, ABS, airbag (SRS), immobilizer and electric power steering.
-A right-to-repair / owner-diagnostics project.
+A DIY device that plugs into the 16-pin OBD2 connector of a **2002 Honda Civic Si (EP3, K20A3)** and
+reads/writes as many diagnostic codes and service functions as the car physically allows — engine,
+ABS, airbag (SRS), immobilizer and electric power steering — up to and including ECM reflash. A
+right-to-repair / owner-diagnostics / enthusiast-tuning project.
 
 > **Status:** research complete, build plan drafted. Nothing built yet.
 
@@ -32,5 +32,6 @@ sniffer mode for reverse-engineering a dealer tool on the car.
 
 ## License
 
-Undecided — see decision 3 in [docs/PLAN.md](docs/PLAN.md). The best Honda protocol references are
-GPL-3.0, which affects whether their code can be reused directly.
+**GPL-3.0** (chosen — see §0 of [docs/PLAN.md](docs/PLAN.md)), so the best K-series/Honda protocol
+references (HondaECU, freediag) can be reused directly. The `LICENSE` file is added when the first
+code lands.
